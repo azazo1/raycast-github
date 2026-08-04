@@ -11,6 +11,7 @@ import {
 import { useCachedPromise } from "@raycast/utils";
 import { useState } from "react";
 
+import { fuzzyScore } from "./fuzzy";
 import { GitHubAuthError, Repo, listRepositories } from "./github";
 
 type Preferences = {
@@ -30,15 +31,26 @@ function formatUpdatedAt(value: string): string {
   });
 }
 
-function repoMatchesQuery(repo: Repo, query: string): boolean {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return true;
+function repoSearchScore(repo: Repo, query: string): number {
+  const candidates = [
+    { text: repo.fullName, weight: 3 },
+    { text: `${repo.name} ${repo.description ?? ""}`, weight: 2 },
+    { text: repo.language ?? "", weight: 1 },
+  ];
+  let bestScore = -1;
+
+  for (const candidate of candidates) {
+    if (!candidate.text) {
+      continue;
+    }
+
+    const score = fuzzyScore(candidate.text, query);
+    if (score >= 0) {
+      bestScore = Math.max(bestScore, score * candidate.weight);
+    }
   }
 
-  return [repo.fullName, repo.description, repo.language].some((value) =>
-    Boolean(value?.toLowerCase().includes(normalizedQuery)),
-  );
+  return bestScore;
 }
 
 function RepoListItem({
@@ -97,9 +109,17 @@ export default function SearchRepos() {
     [githubToken ?? ""],
     { failureToastOptions: { title: "Failed to load repositories" } },
   );
-  const filteredRepos = data?.filter((repo) =>
-    repoMatchesQuery(repo, searchText),
-  );
+  const query = searchText.trim();
+  const filteredRepos = query
+    ? (data ?? [])
+        .map((repo) => ({ repo, score: repoSearchScore(repo, query) }))
+        .filter((item) => item.score >= 0)
+        .sort(
+          (a, b) =>
+            b.score - a.score || a.repo.fullName.localeCompare(b.repo.fullName),
+        )
+        .map((item) => item.repo)
+    : data;
 
   if (error) {
     const title =
