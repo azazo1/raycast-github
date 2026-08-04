@@ -9,6 +9,7 @@ import {
   openExtensionPreferences,
 } from "@raycast/api";
 import { useCachedPromise } from "@raycast/utils";
+import { useState } from "react";
 
 import { GitHubAuthError, Repo, listRepositories } from "./github";
 
@@ -27,6 +28,17 @@ function formatUpdatedAt(value: string): string {
     month: "short",
     day: "numeric",
   });
+}
+
+function repoMatchesQuery(repo: Repo, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [repo.fullName, repo.description, repo.language].some((value) =>
+    Boolean(value?.toLowerCase().includes(normalizedQuery)),
+  );
 }
 
 function RepoListItem({
@@ -79,10 +91,14 @@ function RepoListItem({
 
 export default function SearchRepos() {
   const { githubToken } = getPreferenceValues<Preferences>();
+  const [searchText, setSearchText] = useState("");
   const { data, error, isLoading, revalidate } = useCachedPromise(
     (token: string) => listRepositories(token),
     [githubToken ?? ""],
     { failureToastOptions: { title: "Failed to load repositories" } },
+  );
+  const filteredRepos = data?.filter((repo) =>
+    repoMatchesQuery(repo, searchText),
   );
 
   if (error) {
@@ -132,13 +148,31 @@ export default function SearchRepos() {
     );
   }
 
+  if (!isLoading && data && filteredRepos?.length === 0) {
+    return (
+      <List
+        searchText={searchText}
+        onSearchTextChange={setSearchText}
+        filtering={false}
+      >
+        <List.EmptyView
+          icon={Icon.MagnifyingGlass}
+          title="No repositories match"
+          description="Try a different repository name, description, or language."
+        />
+      </List>
+    );
+  }
+
   return (
     <List
       isLoading={isLoading}
+      searchText={searchText}
+      onSearchTextChange={setSearchText}
+      filtering={false}
       searchBarPlaceholder="Search your GitHub repositories"
-      throttle
     >
-      {data?.map((repo) => (
+      {filteredRepos?.map((repo) => (
         <RepoListItem key={repo.id} repo={repo} onRefresh={revalidate} />
       ))}
     </List>
